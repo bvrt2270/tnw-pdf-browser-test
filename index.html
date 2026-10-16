@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TNW Voucher — Browser PDF Test</title>
+<style>
+:root {font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#243126;background:#f4f7f4}
+*{box-sizing:border-box}main{max-width:670px;margin:35px auto;padding:0 18px}header{margin-bottom:22px}h1{font-size:1.65rem;letter-spacing:-.03em;margin:0 0 8px}p{line-height:1.5;color:#526354}section{background:white;border:1px solid #dce5dc;border-radius:13px;padding:20px;margin-bottom:15px}label.file{display:block;border:2px dashed #96ab99;border-radius:10px;padding:24px 12px;text-align:center;cursor:pointer;background:#f8faf8;font-weight:650}label.file:hover{background:#edf5ec}input[type=file]{position:absolute;opacity:0;width:1px;height:1px}.small{font-size:.83rem;color:#647364}.status{margin-top:14px;white-space:pre-wrap;line-height:1.5}.success{color:#136b3a}.error{color:#ae2634}.pending{color:#785d0e}.row{display:flex;justify-content:space-between;gap:15px;padding:11px 0;border-bottom:1px solid #edf0ed}.row:last-child{border-bottom:none}.value{font-weight:700;word-break:break-word;text-align:right}.hide{display:none}button{border:1px solid #b8c7b8;background:white;padding:9px 14px;border-radius:8px;cursor:pointer}details{margin-top:15px}pre{font:12px/1.5 ui-monospace,Consolas,monospace;background:#f3f5f3;padding:12px;overflow:auto;max-height:220px;white-space:pre-wrap;word-break:break-word}.note{margin-top:14px}code{font-size:.88em}
+</style>
+</head>
+<body>
+<main>
+<header><h1>TNW Voucher — Browser Test</h1><p>PDF-tekst uitlezen rechtstreeks in Edge, Chrome of Safari. Geen Power Apps, Azure of upload naar een server.</p></header>
+<section>
+<label class="file" for="pdf">📄 Selecteer een RIZIV-voucher (PDF)<div class="small" style="margin-top:7px">Nederlandstalige of Franstalige PDF, maximum 5 MB</div></label>
+<input id="pdf" type="file" accept=".pdf,application/pdf">
+<div id="status" class="status pending">PDF.js wordt geladen…</div>
+</section>
+<section id="results" class="hide">
+<strong>Gevonden gegevens</strong>
+<div class="row"><span>Bestand</span><span class="value" id="filename">—</span></div>
+<div class="row"><span>Vouchercode</span><span class="value" id="code">—</span></div>
+<div class="row"><span>Geldig van</span><span class="value" id="start">—</span></div>
+<div class="row"><span>Geldig tot</span><span class="value" id="end">—</span></div>
+<div class="row"><span>Verwerking</span><span class="value" id="duration">—</span></div>
+<details><summary>Technische diagnose (alleen lokaal)</summary><div class="small note" id="diag"></div><pre id="raw"></pre></details>
+</section>
+<section class="small"><b>Privacy:</b> de gekozen PDF wordt uitsluitend binnen de browser verwerkt. Voor deze snelle test wordt de PDF.js-programmacode wel van <code>cdnjs.cloudflare.com</code> geladen. De PDF wordt niet naar deze website gestuurd. Een bedrijfsproxy, webfilter of CSP kan het laden van PDF.js verhinderen. De test bewijst browsercompatibiliteit, nog niet de PCF-integratie met Power Apps of Teams.</section>
+</main>
+<script type="module">
+const BASE='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/';
+const status = document.getElementById('status');
+const input = document.getElementById('pdf');
+const result = document.getElementById('results');
+const put=(id,val)=>document.getElementById(id).textContent=val;
+function setStatus(message,kind='pending'){status.className='status '+kind;status.textContent=message;}
+function search(text,expression){const m=text.match(expression);return m?.[1]?.trim()||'';}
+function parseVoucher(text){
+  // PdfPig and PDF.js can concatenate PDF text chunks differently: keep tolerant patterns.
+  const code=search(text,/(?:Vouchercode|Code\s*de\s*voucher)\s*:\s*([A-Z0-9]{8})/i);
+  const start=search(text,/(?:Geldig\s*van|Valable\s*[àa]\s*partir\s*de)\s*:\s*(\d{2}\s*\/\s*\d{2}\s*\/\s*\d{4})/i);
+  const end=search(text,/(?:Geldig\s*tot|Valable\s*jusqu\s*['’]?\s*au)\s*:\s*(\d{2}\s*\/\s*\d{2}\s*\/\s*\d{4})/i);
+  return {code:code.toUpperCase(),start:start.replace(/\s/g,''),end:end.replace(/\s/g,'')};
+}
+let pdfjs;
+try {
+  pdfjs=await import(BASE+'pdf.min.mjs');
+  pdfjs.GlobalWorkerOptions.workerSrc=BASE+'pdf.worker.min.mjs';
+  setStatus('PDF.js is geladen. Selecteer een PDF.','success');
+} catch(err){setStatus('PDF.js kon niet laden. Controleer internettoegang of blokkering van cdnjs.cloudflare.com.\n'+err.message,'error');}
+input.addEventListener('change',async()=>{
+ const file=input.files?.[0];if(!file)return;
+ result.classList.add('hide');
+ if(!pdfjs){setStatus('PDF.js is niet geladen.','error');return;}
+ if(file.size>5*1024*1024){setStatus('PDF is groter dan 5 MB.','error');return;}
+ setStatus('PDF wordt lokaal uitgelezen…','pending');const started=performance.now();
+ try{
+   const bytes=new Uint8Array(await file.arrayBuffer());
+   const loading=pdfjs.getDocument({data:bytes});const doc=await loading.promise;
+   const pages=[];
+   for(let i=1;i<=doc.numPages;i++){
+      const p=await doc.getPage(i);const content=await p.getTextContent();
+      const items=content.items.filter(x=>typeof x.str==='string');
+      // PDF text chunks are not always in complete word order. Test with both joined formats.
+      pages.push({compact:items.map(x=>x.str).join(''), spaced:items.map(x=>x.str).join(' ')});
+   }
+   const compact=pages.map(p=>p.compact).join(' ');
+   const spaced=pages.map(p=>p.spaced).join(' ');
+   let found=parseVoucher(compact);
+   const withSpaces=parseVoucher(spaced);
+   for(const k of ['code','start','end'])if(!found[k])found[k]=withSpaces[k];
+   const elapsed=Math.round(performance.now()-started);
+   put('filename',file.name);put('code',found.code||'Niet gevonden');put('start',found.start||'Niet gevonden');put('end',found.end||'Niet gevonden');put('duration',elapsed+' ms');
+   put('diag',`${navigator.userAgent}\nPDF-pagina's: ${doc.numPages}; PDF-tekstlengte: ${compact.length} tekens; offline verwerking: ja`);
+   put('raw',compact.slice(0,1800));
+   result.classList.remove('hide');
+   if(found.code&&found.start&&found.end)setStatus('✓ Extractie geslaagd. Alle drie waarden herkend.','success');
+   else if(compact.trim())setStatus('PDF heeft een tekstlaag, maar niet alle voucherwaarden werden herkend. Bekijk Technische diagnose.','error');
+   else setStatus('Geen leesbare tekstlaag gevonden. Dit kan een gescande PDF zijn.','error');
+   await doc.destroy();
+ } catch(err){setStatus('Fout bij PDF-verwerking: '+(err?.message||String(err)),'error');}
+});
+</script>
+</body>
+</html>
